@@ -1,0 +1,156 @@
+import tkinter as tk
+from tkinter import messagebox, ttk
+import sqlite3
+import openpyxl
+
+# قاعدة البيانات
+conn = sqlite3.connect("real_estate.db")
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS properties (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    address TEXT NOT NULL,
+    type TEXT NOT NULL,
+    price TEXT NOT NULL,
+    status TEXT NOT NULL
+)
+""")
+conn.commit()
+
+# الوظائف الأساسية
+def حفظ_العقار():
+    العنوان = entry_address.get()
+    النوع = entry_type.get()
+    السعر = entry_price.get()
+    الحالة = entry_status.get()
+
+    if not (العنوان and النوع and السعر and الحالة):
+        messagebox.showerror("خطأ", "يرجى ملء جميع الحقول.")
+        return
+
+    if selected_id.get():
+        cursor.execute("UPDATE properties SET address=?, type=?, price=?, status=? WHERE id=?",
+                       (العنوان, النوع, السعر, الحالة, selected_id.get()))
+        messagebox.showinfo("تم", "تم تعديل العقار.")
+    else:
+        cursor.execute("INSERT INTO properties (address, type, price, status) VALUES (?, ?, ?, ?)",
+                       (العنوان, النوع, السعر, الحالة))
+        messagebox.showinfo("تم", "تم حفظ العقار.")
+    conn.commit()
+    تحديث_العرض()
+    مسح_الحقول()
+
+def تحديث_العرض(filter_text=""):
+    for row in tree.get_children():
+        tree.delete(row)
+
+    query = "SELECT id, address, type, price, status FROM properties"
+    params = ()
+    if filter_text:
+        query += " WHERE address LIKE ? OR type LIKE ? OR price LIKE ? OR status LIKE ?"
+        params = tuple([f"%{filter_text}%"] * 4)
+
+    cursor.execute(query, params)
+    for row in cursor.fetchall():
+        tree.insert("", tk.END, values=row)
+
+def تحميل_للتعديل(event):
+    selected = tree.focus()
+    if not selected:
+        return
+    values = tree.item(selected, 'values')
+    selected_id.set(values[0])
+    entry_address.delete(0, tk.END)
+    entry_address.insert(0, values[1])
+    entry_type.delete(0, tk.END)
+    entry_type.insert(0, values[2])
+    entry_price.delete(0, tk.END)
+    entry_price.insert(0, values[3])
+    entry_status.delete(0, tk.END)
+    entry_status.insert(0, values[4])
+
+def حذف_العقار():
+    if not selected_id.get():
+        messagebox.showwarning("تنبيه", "اختر عقارًا لحذفه.")
+        return
+    if messagebox.askyesno("تأكيد", "هل تريد حذف هذا العقار؟"):
+        cursor.execute("DELETE FROM properties WHERE id=?", (selected_id.get(),))
+        conn.commit()
+        messagebox.showinfo("تم", "تم الحذف بنجاح.")
+        تحديث_العرض()
+        مسح_الحقول()
+
+def مسح_الحقول():
+    selected_id.set("")
+    entry_address.delete(0, tk.END)
+    entry_type.delete(0, tk.END)
+    entry_price.delete(0, tk.END)
+    entry_status.delete(0, tk.END)
+
+def تصدير_إلى_اكسل():
+    cursor.execute("SELECT address, type, price, status FROM properties")
+    data = cursor.fetchall()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["العنوان", "نوع العقار", "السعر", "الحالة"])
+    for row in data:
+        ws.append(row)
+
+    wb.save("عقارات.xlsx")
+    messagebox.showinfo("تم", "تم تصدير البيانات إلى عقارات.xlsx")
+
+def تنفيذ_البحث(*args):
+    نص_البحث = entry_search.get()
+    تحديث_العرض(filter_text=نص_البحث)
+
+# واجهة المستخدم
+window = tk.Tk()
+window.title("إدارة العقارات")
+window.geometry("750x650")
+
+selected_id = tk.StringVar()
+
+# حقول الإدخال
+tk.Label(window, text="العنوان:").pack()
+entry_address = tk.Entry(window, width=60)
+entry_address.pack()
+
+tk.Label(window, text="نوع العقار:").pack()
+entry_type = tk.Entry(window, width=60)
+entry_type.pack()
+
+tk.Label(window, text="السعر:").pack()
+entry_price = tk.Entry(window, width=60)
+entry_price.pack()
+
+tk.Label(window, text="حالة العقار:").pack()
+entry_status = tk.Entry(window, width=60)
+entry_status.pack()
+
+# أزرار CRUD
+frame_buttons = tk.Frame(window)
+frame_buttons.pack(pady=10)
+tk.Button(frame_buttons, text="حفظ / تعديل", command=حفظ_العقار, width=15).pack(side=tk.LEFT, padx=5)
+tk.Button(frame_buttons, text="حذف", command=حذف_العقار, width=15).pack(side=tk.LEFT, padx=5)
+tk.Button(frame_buttons, text="مسح الحقول", command=مسح_الحقول, width=15).pack(side=tk.LEFT, padx=5)
+
+# البحث
+tk.Label(window, text="بحث:").pack()
+entry_search = tk.Entry(window, width=60)
+entry_search.pack()
+entry_search.bind("<KeyRelease>", تنفيذ_البحث)
+
+# جدول العقارات
+tree = ttk.Treeview(window, columns=("ID", "العنوان", "النوع", "السعر", "الحالة"), show="headings")
+for col in ("ID", "العنوان", "النوع", "السعر", "الحالة"):
+    tree.heading(col, text=col)
+tree.bind("<ButtonRelease-1>", تحميل_للتعديل)
+tree.pack(fill=tk.BOTH, expand=True, pady=10)
+
+# زر تصدير
+tk.Button(window, text="تصدير إلى Excel", command=تصدير_إلى_اكسل).pack(pady=10)
+
+# تحميل البيانات
+تحديث_العرض()
+window.mainloop()
